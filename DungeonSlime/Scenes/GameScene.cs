@@ -1,5 +1,7 @@
 using System;
+using DungeonSlime.UI;
 using Gum.DataTypes;
+using Gum.Managers;
 using Gum.Wireframe;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Audio;
@@ -12,6 +14,7 @@ using MonoGameLibrary;
 using MonoGameLibrary.Graphics;
 using MonoGameLibrary.Input;
 using MonoGameLibrary.Scenes;
+
 
 namespace DungeonSlime.Scenes;
 
@@ -58,18 +61,21 @@ public class GameScene : Scene
 
     // Defines the origin used when drawing the score text.
     private Vector2 _scoreTextOrigin;
-    
+
     // A reference to the pause panel UI element so we can set its visibility
     // when the game is paused.
     private Panel _pausePanel;
 
     // A reference to the resume button UI element so we can focus it
     // when the game is paused.
-    private Button _resumeButton;
+    private AnimatedButton _resumeButton;
 
     // The UI sound effect to play when a UI event is triggered.
     private SoundEffect _uiSoundEffect;
 
+    // Reference to the texture atlas that we can pass to UI elements when they
+    // are created.
+    private TextureAtlas _atlas;
 
     public override void Initialize()
     {
@@ -107,23 +113,22 @@ public class GameScene : Scene
 
         // Assign the initial random velocity to the bat.
         AssignRandomBatVelocity();
-        
-        InitializeUI();
 
+        InitializeUI();
     }
 
 
     public override void LoadContent()
     {
-        // Create the texture atlas from the XML configuration file.
-        TextureAtlas atlas = TextureAtlas.FromFile(Core.Content, "images/atlas-definition.xml");
+        // Create the texture atlas from the XML configuration file
+        _atlas = TextureAtlas.FromFile(Core.Content, "images/atlas-definition.xml");
 
         // Create the slime animated sprite from the atlas.
-        _slime = atlas.CreateAnimatedSprite("slime-animation");
+        _slime = _atlas.CreateAnimatedSprite("slime-animation");
         _slime.Scale = new Vector2(4.0f, 4.0f);
 
         // Create the bat animated sprite from the atlas.
-        _bat = atlas.CreateAnimatedSprite("bat-animation");
+        _bat = _atlas.CreateAnimatedSprite("bat-animation");
         _bat.Scale = new Vector2(4.0f, 4.0f);
 
         // Create the tilemap from the XML configuration file.
@@ -138,7 +143,7 @@ public class GameScene : Scene
 
         // Load the font.
         _font = Core.Content.Load<SpriteFont>("fonts/04B_30");
-        
+
         // Load the sound effect to play when ui actions occur.
         _uiSoundEffect = Core.Content.Load<SoundEffect>("audio/ui");
     }
@@ -153,7 +158,7 @@ public class GameScene : Scene
         {
             return;
         }
-        
+
         // Update the slime animated sprite.
         _slime.Update(gameTime);
 
@@ -347,7 +352,7 @@ public class GameScene : Scene
     {
         // Get the gamepad info for gamepad one.
         GamePadInfo gamePadOne = Core.Input.GamePads[(int)PlayerIndex.One];
-        
+
         // If the start button is pressed, pause the game
         if (gamePadOne.WasButtonJustPressed(Buttons.Start))
         {
@@ -402,7 +407,7 @@ public class GameScene : Scene
             }
         }
     }
-    
+
     public override void Draw(GameTime gameTime)
     {
         // Clear the back buffer.
@@ -422,20 +427,20 @@ public class GameScene : Scene
 
         // Draw the score.
         Core.SpriteBatch.DrawString(
-            _font,              // spriteFont
+            _font, // spriteFont
             $"Score: {_score}", // text
             _scoreTextPosition, // position
-            Color.White,        // color
-            0.0f,               // rotation
-            _scoreTextOrigin,   // origin
-            1.0f,               // scale
+            Color.White, // color
+            0.0f, // rotation
+            _scoreTextOrigin, // origin
+            1.0f, // scale
             SpriteEffects.None, // effects
-            0.0f                // layerDepth
+            0.0f // layerDepth
         );
 
         // Always end the sprite batch when finished.
         Core.SpriteBatch.End();
-        
+
         // Draw the Gum UI
         GumService.Default.Draw();
     }
@@ -448,7 +453,7 @@ public class GameScene : Scene
         // Set the resume button to have focus
         _resumeButton.IsFocused = true;
     }
-    
+
     private void CreatePausePanel()
     {
         _pausePanel = new Panel();
@@ -460,32 +465,40 @@ public class GameScene : Scene
         _pausePanel.IsVisible = false;
         _pausePanel.AddToRoot();
 
-        var background = new ColoredRectangleRuntime();
+        TextureRegion backgroundRegion = _atlas.GetRegion("panel-background");
+
+        NineSliceRuntime background = new NineSliceRuntime();
         background.Dock(Dock.Fill);
-        background.Color = Color.DarkBlue;
+        background.Texture = backgroundRegion.Texture;
+        background.TextureAddress = TextureAddress.Custom;
+        background.TextureHeight = backgroundRegion.Height;
+        background.TextureLeft = backgroundRegion.SourceRectangle.Left;
+        background.TextureTop = backgroundRegion.SourceRectangle.Top;
+        background.TextureWidth = backgroundRegion.Width;
         _pausePanel.AddChild(background);
 
-        var textInstance = new TextRuntime();
+        TextRuntime textInstance = new TextRuntime();
         textInstance.Text = "PAUSED";
+        textInstance.CustomFontFile = @"fonts/04b_30.fnt";
+        textInstance.UseCustomFont = true;
+        textInstance.FontScale = 0.5f;
         textInstance.X = 10f;
         textInstance.Y = 10f;
         _pausePanel.AddChild(textInstance);
 
-        _resumeButton = new Button();
+        _resumeButton = new AnimatedButton(_atlas);
         _resumeButton.Text = "RESUME";
         _resumeButton.Anchor(Anchor.BottomLeft);
         _resumeButton.Visual.X = 9f;
         _resumeButton.Visual.Y = -9f;
-        _resumeButton.Visual.Width = 80;
         _resumeButton.Click += HandleResumeButtonClicked;
         _pausePanel.AddChild(_resumeButton);
 
-        var quitButton = new Button();
+        AnimatedButton quitButton = new AnimatedButton(_atlas);
         quitButton.Text = "QUIT";
         quitButton.Anchor(Anchor.BottomRight);
         quitButton.Visual.X = -9f;
         quitButton.Visual.Y = -9f;
-        quitButton.Width = 80;
         quitButton.Click += HandleQuitButtonClicked;
 
         _pausePanel.AddChild(quitButton);
@@ -515,6 +528,4 @@ public class GameScene : Scene
 
         CreatePausePanel();
     }
-
-
 }
