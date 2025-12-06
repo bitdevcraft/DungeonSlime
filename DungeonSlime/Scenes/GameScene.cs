@@ -1,13 +1,16 @@
 using System;
-using DungeonSlime.GameObjects;
+using DungeonSlime.ECS.Components;
+using DungeonSlime.ECS.Systems;
 using DungeonSlime.UI;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Audio;
 using Microsoft.Xna.Framework.Graphics;
+using Microsoft.Xna.Framework.Input;
 using MonoGameGum;
 using MonoGameLibrary;
 using MonoGameLibrary.Graphics;
 using MonoGameLibrary.Scenes;
+using Friflo.Engine.ECS;
 
 namespace DungeonSlime.Scenes;
 
@@ -20,11 +23,9 @@ public class GameScene : Scene
         GameOver
     }
 
-    // Reference to the slime.
-    private Slime _slime;
-
-    // Reference to the bat.
-    private Bat _bat;
+    private EcsWorld _world;
+    private EcsEntity _slimeEntity;
+    private EcsEntity _batEntity;
 
     // Defines the tilemap to draw.
     private Tilemap _tilemap;
@@ -41,6 +42,12 @@ public class GameScene : Scene
     private GameSceneUI _ui;
 
     private GameState _state;
+
+    private SlimeComponent Slime => _slimeEntity.Get<SlimeComponent>();
+    private PositionComponent BatPosition => _batEntity.Get<PositionComponent>();
+    private VelocityComponent BatVelocity => _batEntity.Get<VelocityComponent>();
+    private AnimatedSpriteComponent BatSprite => _batEntity.Get<AnimatedSpriteComponent>();
+    private BatComponent Bat => _batEntity.Get<BatComponent>();
 
     public override void Initialize()
     {
@@ -60,7 +67,7 @@ public class GameScene : Scene
 
         // Subscribe to the slime's BodyCollision event so that a game over
         // can be triggered when this event is raised.
-        _slime.BodyCollision += OnSlimeBodyCollision;
+        Slime.BodyCollision += OnSlimeBodyCollision;
 
         // Create any UI elements from the root element created in previous
         // scenes.
@@ -116,14 +123,16 @@ public class GameScene : Scene
         slimePos.Y = (_tilemap.Rows / 2) * _tilemap.TileHeight;
 
         // Initialize the slime.
-        _slime.Initialize(slimePos, _tilemap.TileWidth);
+        Slime.Reset(slimePos, _tilemap.TileWidth);
 
         // Initialize the bat.
-        _bat.RandomizeVelocity();
+        RandomizeBatVelocity();
         PositionBatAwayFromSlime();
 
         // Reset the score.
         _score = 0;
+
+        _ui.UpdateScoreText(_score);
 
         // Set the game state to playing.
         _state = GameState.Playing;
@@ -142,9 +151,6 @@ public class GameScene : Scene
         AnimatedSprite slimeAnimation = atlas.CreateAnimatedSprite("slime-animation");
         slimeAnimation.Scale = new Vector2(4.0f, 4.0f);
 
-        // Create the slime.
-        _slime = new Slime(slimeAnimation);
-
         // Create the animated sprite for the bat from the atlas.
         AnimatedSprite batAnimation = atlas.CreateAnimatedSprite("bat-animation");
         batAnimation.Scale = new Vector2(4.0f, 4.0f);
@@ -152,11 +158,26 @@ public class GameScene : Scene
         // Load the bounce sound effect for the bat.
         SoundEffect bounceSoundEffect = Content.Load<SoundEffect>("audio/bounce");
 
-        // Create the bat.
-        _bat = new Bat(batAnimation, bounceSoundEffect);
-
         // Load the collect sound effect.
         _collectSoundEffect = Content.Load<SoundEffect>("audio/collect");
+
+        _world = new EcsWorld();
+
+        _slimeEntity = _world.CreateEntity();
+        _slimeEntity.Add(new SlimeComponent(slimeAnimation));
+
+        _batEntity = _world.CreateEntity();
+        _batEntity.Add(new PositionComponent());
+        _batEntity.Add(new VelocityComponent());
+        _batEntity.Add(new AnimatedSpriteComponent(batAnimation));
+        _batEntity.Add(new BatComponent(bounceSoundEffect));
+
+        _world.AddUpdateSystem(new SlimeInputSystem(Core.Input.Keyboard, Core.Input.GamePads[(int)PlayerIndex.One], () => _state == GameState.Playing));
+        _world.AddUpdateSystem(new SlimeMovementSystem(() => _state == GameState.Playing));
+        _world.AddUpdateSystem(new BatMovementSystem(() => _state == GameState.Playing));
+
+        _world.AddDrawSystem(new SlimeDrawSystem(Core.SpriteBatch));
+        _world.AddDrawSystem(new BatDrawSystem(Core.SpriteBatch));
     }
 
     public override void Update(GameTime gameTime)
@@ -183,11 +204,7 @@ public class GameScene : Scene
             return;
         }
 
-        // Update the slime.
-        _slime.Update(gameTime);
-
-        // Update the bat.
-        _bat.Update(gameTime);
+        _world.Update(gameTime);
 
         // Perform collision checks.
         CollisionChecks();
@@ -196,8 +213,8 @@ public class GameScene : Scene
     private void CollisionChecks()
     {
         // Capture the current bounds of the slime and bat.
-        Circle slimeBounds = _slime.GetBounds();
-        Circle batBounds = _bat.GetBounds();
+        Circle slimeBounds = Slime.GetBounds();
+        Circle batBounds = GetBatBounds();
 
         // FIrst perform a collision check to see if the slime is colliding with
         // the bat, which means the slime eats the bat.
@@ -207,10 +224,10 @@ public class GameScene : Scene
             PositionBatAwayFromSlime();
 
             // Randomize the velocity of the bat.
-            _bat.RandomizeVelocity();
+            RandomizeBatVelocity();
 
             // Tell the slime to grow.
-            _slime.Grow();
+            Slime.Grow();
 
             // Increment the score.
             _score += 100;
@@ -240,20 +257,20 @@ public class GameScene : Scene
         // off of that wall.
         if (batBounds.Top < _roomBounds.Top)
         {
-            _bat.Bounce(Vector2.UnitY);
+            BounceBat(Vector2.UnitY);
         }
         else if (batBounds.Bottom > _roomBounds.Bottom)
         {
-            _bat.Bounce(-Vector2.UnitY);
+            BounceBat(-Vector2.UnitY);
         }
 
         if (batBounds.Left < _roomBounds.Left)
         {
-            _bat.Bounce(Vector2.UnitX);
+            BounceBat(Vector2.UnitX);
         }
         else if (batBounds.Right > _roomBounds.Right)
         {
-            _bat.Bounce(-Vector2.UnitX);
+            BounceBat(-Vector2.UnitX);
         }
     }
 
@@ -266,7 +283,7 @@ public class GameScene : Scene
         Vector2 roomCenter = new Vector2(roomCenterX, roomCenterY);
 
         // Get the bounds of the slime and calculate the center position.
-        Circle slimeBounds = _slime.GetBounds();
+        Circle slimeBounds = Slime.GetBounds();
         Vector2 slimeCenter = new Vector2(slimeBounds.X, slimeBounds.Y);
 
         // Calculate the distance vector from the center of the room to the
@@ -274,7 +291,7 @@ public class GameScene : Scene
         Vector2 centerToSlime = slimeCenter - roomCenter;
 
         // Get the bounds of the bat.
-        Circle batBounds = _bat.GetBounds();
+        Circle batBounds = GetBatBounds();
 
         // Calculate the amount of padding we will add to the new position of
         // the bat to ensure it is not sticking to walls
@@ -331,7 +348,48 @@ public class GameScene : Scene
         }
 
         // Assign the new bat position.
-        _bat.Position = newBatPosition;
+        BatPosition.Value = newBatPosition;
+    }
+
+
+    private void RandomizeBatVelocity()
+    {
+        float angle = (float)(Random.Shared.NextDouble() * MathHelper.TwoPi);
+        Vector2 direction = new Vector2((float)Math.Cos(angle), (float)Math.Sin(angle));
+        const float movementSpeed = 5.0f;
+        BatVelocity.Value = direction * movementSpeed;
+    }
+
+    private void BounceBat(Vector2 normal)
+    {
+        Vector2 newPosition = BatPosition.Value;
+
+        if (normal.X != 0)
+        {
+            newPosition.X += normal.X * (BatSprite.Sprite.Width * 0.1f);
+        }
+
+        if (normal.Y != 0)
+        {
+            newPosition.Y += normal.Y * (BatSprite.Sprite.Height * 0.1f);
+        }
+
+        BatPosition.Value = newPosition;
+
+        normal.Normalize();
+        BatVelocity.Value = Vector2.Reflect(BatVelocity.Value, normal);
+        Core.Audio.PlaySoundEffect(Bat.BounceSoundEffect);
+    }
+
+    private Circle GetBatBounds()
+    {
+        AnimatedSprite sprite = BatSprite.Sprite;
+        Vector2 position = BatPosition.Value;
+        int x = (int)(position.X + sprite.Width * 0.5f);
+        int y = (int)(position.Y + sprite.Height * 0.5f);
+        int radius = (int)(sprite.Width * 0.25f);
+
+        return new Circle(x, y, radius);
     }
 
 
@@ -380,11 +438,7 @@ public class GameScene : Scene
         // Draw the tilemap
         _tilemap.Draw(Core.SpriteBatch);
 
-        // Draw the slime.
-        _slime.Draw();
-
-        // Draw the bat.
-        _bat.Draw();
+        _world.Draw(gameTime);
 
         // Always end the sprite batch when finished.
         Core.SpriteBatch.End();
