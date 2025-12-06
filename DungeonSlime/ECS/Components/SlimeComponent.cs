@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using DungeonSlime.GameObjects;
 using Microsoft.Xna.Framework;
 using MonoGameLibrary;
 using MonoGameLibrary.Graphics;

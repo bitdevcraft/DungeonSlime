@@ -1,5 +1,6 @@
 using System;
 using DungeonSlime.ECS.Components;
+using DungeonSlime.GameObjects;
 using Friflo.Engine.ECS;
 using Microsoft.Xna.Framework;
 
